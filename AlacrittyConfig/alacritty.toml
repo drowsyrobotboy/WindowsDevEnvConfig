@@ -1,0 +1,6 @@
+# Alacritty configuration for WSL
+# Place this in %APPDATA%/alacritty/alacritty.toml
+
+[terminal.shell]
+program = "C:\\Windows\\System32\\wsl.exe"
+args = ["-d", "FedoraLinux-42", "--cd", "~"]
