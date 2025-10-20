@@ -185,9 +185,33 @@ DualDisplayManager.Initialize()
 !3::SwitchToDesktop(3)
 !4::SwitchToDesktop(4)
 !5::SwitchToDesktop(5)
+!6::SwitchToDesktop(6)
 
 ; Hotkey to create a new virtual desktop and switch to it
 !+d::VD.createDesktop(true)
+
+; Hotkeys to move the focused window to a specific virtual desktop
+!+1::MoveActiveWindowToDesktop(1)
+!+2::MoveActiveWindowToDesktop(2)
+!+3::MoveActiveWindowToDesktop(3)
+!+4::MoveActiveWindowToDesktop(4)
+!+5::MoveActiveWindowToDesktop(5)
+!+6::MoveActiveWindowToDesktop(6)
+
+; Function to move the active window to a specific desktop
+MoveActiveWindowToDesktop(desktopNum) {
+    activeWindow := WinExist("A")
+    if (activeWindow) {
+        result := VD.MoveWindowToDesktopNum("ahk_id " activeWindow, desktopNum)
+        if (result.hwnd) {
+            ToolTip("Moved window to Desktop " desktopNum)
+            SetTimer(() => ToolTip(), -1500)
+        } else {
+            ToolTip("Failed to move window")
+            SetTimer(() => ToolTip(), -1500)
+        }
+    }
+}
 
 ; Debug hotkey to manually trigger pinning (Alt+Shift+P)
 !+p::DualDisplayManager.PinPrimaryDisplayApps()
