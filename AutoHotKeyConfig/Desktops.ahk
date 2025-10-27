@@ -8,21 +8,25 @@ class DualDisplayManager {
     static primaryDisplayBounds := {}
     static pinnedWindows := Map()
     static currentMonitorCount := 0
-    
+    static eventHook := 0
+    static EVENT_OBJECT_LOCATIONCHANGE := 0x800B
+    static WINEVENT_OUTOFCONTEXT := 0x0000
+
     static Initialize() {
         this.DetectDisplays()
         this.currentMonitorCount := Max(this.ahkMonitorCount, this.apiMonitorCount)
-        
+
         ; Debug: Show detection results
         ToolTip("AHK: " . this.ahkMonitorCount . " | API: " . this.apiMonitorCount . " | Multiple displays: " . (this.hasMultipleDisplays ? "Yes" : "No"))
         SetTimer(() => ToolTip(), -3000)  ; Hide tooltip after 3 seconds
-        
+
         ; Register for display change notifications
         OnMessage(0x007E, OnDisplayChangeCallback)  ; WM_DISPLAYCHANGE
-        
+
         if (this.hasMultipleDisplays) {
             this.GetPrimaryDisplayBounds()
             this.PinPrimaryDisplayApps()
+            this.StartWindowEventHook()
         }
     }
     
@@ -125,11 +129,13 @@ class DualDisplayManager {
         
         if (wasMultiple && !this.hasMultipleDisplays) {
             ; Going from multiple to single monitor - unpin all our pinned windows
+            this.StopWindowEventHook()
             this.UnpinAllWindows()
         } else if (!wasMultiple && this.hasMultipleDisplays) {
             ; Going from single to multiple monitors - pin primary display apps
             this.GetPrimaryDisplayBounds()
             this.PinPrimaryDisplayApps()
+            this.StartWindowEventHook()
         } else if (this.hasMultipleDisplays && (newCount != oldCount)) {
             ; Monitor count changed but still multiple - refresh pinning
             this.GetPrimaryDisplayBounds()
@@ -150,10 +156,77 @@ class DualDisplayManager {
             }
         }
         this.pinnedWindows.Clear()
-        
+
         if (count > 0) {
             ToolTip("Unpinned " . count . " windows (switched to single monitor)")
             SetTimer(() => ToolTip(), -2000)
+        }
+    }
+
+    static StartWindowEventHook() {
+        ; Create a callback for window location changes
+        this.eventHook := DllCall("SetWinEventHook",
+            "UInt", this.EVENT_OBJECT_LOCATIONCHANGE,
+            "UInt", this.EVENT_OBJECT_LOCATIONCHANGE,
+            "Ptr", 0,
+            "Ptr", CallbackCreate(ObjBindMethod(this, "OnWindowLocationChange")),
+            "UInt", 0,
+            "UInt", 0,
+            "UInt", this.WINEVENT_OUTOFCONTEXT,
+            "Ptr")
+    }
+
+    static StopWindowEventHook() {
+        if (this.eventHook) {
+            DllCall("UnhookWinEvent", "Ptr", this.eventHook)
+            this.eventHook := 0
+        }
+    }
+
+    static OnWindowLocationChange(hWinEventHook, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime) {
+        ; Only process window objects (not child controls)
+        if (idObject != 0)  ; OBJID_WINDOW = 0
+            return
+
+        ; Check if this window is in our pinned list
+        if (DualDisplayManager.pinnedWindows.Has(hwnd)) {
+            try {
+                ; Check if window still exists
+                if (!WinExist("ahk_id " hwnd))
+                    return
+
+                ; Check if window moved to secondary monitor
+                if (!DualDisplayManager.IsWindowOnPrimaryDisplay(hwnd)) {
+                    ; Unpin the window
+                    VD.UnPinWindow("ahk_id " hwnd)
+                    DualDisplayManager.pinnedWindows.Delete(hwnd)
+                }
+            } catch {
+                ; Ignore errors
+            }
+        } else {
+            ; Check if this is a new window on primary display that should be pinned
+            try {
+                if (!WinExist("ahk_id " hwnd))
+                    return
+
+                ; Get window title
+                winTitle := WinGetTitle("ahk_id " hwnd)
+                if (winTitle == "")
+                    return
+
+                ; Check if window is on primary display
+                if (DualDisplayManager.IsWindowOnPrimaryDisplay(hwnd)) {
+                    ; Check if it's not already pinned
+                    if (VD.IsWindowPinned("ahk_id " hwnd) != 1) {
+                        ; Pin the window
+                        VD.PinWindow("ahk_id " hwnd)
+                        DualDisplayManager.pinnedWindows[hwnd] := true
+                    }
+                }
+            } catch {
+                ; Ignore errors
+            }
         }
     }
     
