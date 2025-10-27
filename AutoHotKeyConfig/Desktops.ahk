@@ -165,11 +165,13 @@ class DualDisplayManager {
 
     static StartWindowEventHook() {
         ; Create a callback for window location changes
+        ; Store callback to prevent garbage collection
+        this.eventCallback := CallbackCreate(WindowLocationChangeCallback, "F", 7)
         this.eventHook := DllCall("SetWinEventHook",
             "UInt", this.EVENT_OBJECT_LOCATIONCHANGE,
             "UInt", this.EVENT_OBJECT_LOCATIONCHANGE,
             "Ptr", 0,
-            "Ptr", CallbackCreate(ObjBindMethod(this, "OnWindowLocationChange")),
+            "Ptr", this.eventCallback,
             "UInt", 0,
             "UInt", 0,
             "UInt", this.WINEVENT_OUTOFCONTEXT,
@@ -181,25 +183,29 @@ class DualDisplayManager {
             DllCall("UnhookWinEvent", "Ptr", this.eventHook)
             this.eventHook := 0
         }
+        if (this.eventCallback) {
+            CallbackFree(this.eventCallback)
+            this.eventCallback := 0
+        }
     }
 
-    static OnWindowLocationChange(hWinEventHook, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime) {
-        ; Only process window objects (not child controls)
-        if (idObject != 0)  ; OBJID_WINDOW = 0
+    static OnWindowLocationChange(hwnd) {
+        ; Only check if we have multiple displays
+        if (!this.hasMultipleDisplays)
             return
 
         ; Check if this window is in our pinned list
-        if (DualDisplayManager.pinnedWindows.Has(hwnd)) {
+        if (this.pinnedWindows.Has(hwnd)) {
             try {
                 ; Check if window still exists
                 if (!WinExist("ahk_id " hwnd))
                     return
 
                 ; Check if window moved to secondary monitor
-                if (!DualDisplayManager.IsWindowOnPrimaryDisplay(hwnd)) {
+                if (!this.IsWindowOnPrimaryDisplay(hwnd)) {
                     ; Unpin the window
                     VD.UnPinWindow("ahk_id " hwnd)
-                    DualDisplayManager.pinnedWindows.Delete(hwnd)
+                    this.pinnedWindows.Delete(hwnd)
                 }
             } catch {
                 ; Ignore errors
@@ -216,12 +222,12 @@ class DualDisplayManager {
                     return
 
                 ; Check if window is on primary display
-                if (DualDisplayManager.IsWindowOnPrimaryDisplay(hwnd)) {
+                if (this.IsWindowOnPrimaryDisplay(hwnd)) {
                     ; Check if it's not already pinned
                     if (VD.IsWindowPinned("ahk_id " hwnd) != 1) {
                         ; Pin the window
                         VD.PinWindow("ahk_id " hwnd)
-                        DualDisplayManager.pinnedWindows[hwnd] := true
+                        this.pinnedWindows[hwnd] := true
                     }
                 }
             } catch {
@@ -241,6 +247,15 @@ class DualDisplayManager {
 ; Callback function for display change notifications
 OnDisplayChangeCallback(wParam, lParam, msg, hwnd) {
     DualDisplayManager.OnDisplayChange(wParam, lParam, msg, hwnd)
+}
+
+; Callback function for window location change events
+WindowLocationChangeCallback(hWinEventHook, event, hwnd, idObject, idChild, idEventThread, dwmsEventTime) {
+    ; Only process window objects (not child controls)
+    if (idObject != 0)  ; OBJID_WINDOW = 0
+        return
+
+    DualDisplayManager.OnWindowLocationChange(hwnd)
 }
 
 ; Custom desktop switching function that handles dual displays
